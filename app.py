@@ -8,16 +8,8 @@ import streamlit as st
 from simplex_solver import SimplexError, SimplexResult, simplex
 
 
-st.set_page_config(page_title="Simplex Solver", layout="wide")
-st.title("Simplex Method Solver")
-st.markdown(
-    """
-Solve maximization problems of the form
-\\( \\max c^T x \\) subject to \\( A x \\le b \\) and \\( x \\ge 0 \\).
-Enter data manually or upload a JSON/CSV description.
-"""
-)
-
+st.set_page_config(page_title="simplex solver", layout="wide")
+st.title("simplex method solver (standard form only)")
 
 def _display_tableau(result: SimplexResult) -> None:
     n = result.num_variables
@@ -30,12 +22,12 @@ def _display_tableau(result: SimplexResult) -> None:
 
     rows = []
     for idx, row in enumerate(result.tableau[:-1]):
-        entry = {"row": f"C{idx + 1}"}
+        entry = {"row": f"c{idx + 1}"}
         for col_idx, label in enumerate(column_labels):
             entry[label] = round(row[col_idx], 6)
         rows.append(entry)
 
-    objective_row = {"row": "Obj"}
+    objective_row = {"row": "obj"}
     for col_idx, label in enumerate(column_labels):
         objective_row[label] = round(result.tableau[-1][col_idx], 6)
     rows.append(objective_row)
@@ -46,19 +38,19 @@ def _display_tableau(result: SimplexResult) -> None:
 def _display_result(result: SimplexResult) -> None:
     if result.status == "optimal":
         st.success(
-            f"Optimal solution found in {result.iterations} iterations. "
-            f"Objective value: {round(result.optimal_value, 6)}"
+            f"optimal solution found in {result.iterations} iterations. "
+            f"objective value: {round(result.optimal_value, 6)}"
         )
-        st.write("Decision variables:", [round(x, 6) for x in result.solution or []])
+        st.write("decision variables:", [round(x, 6) for x in result.solution or []])
     elif result.status == "unbounded":
-        st.error("The LP is unbounded.")
+        st.error("the lp is unbounded.")
     elif result.status == "iteration_limit":
-        st.error("Iteration limit reached; no optimal solution identified.")
+        st.error("iteration limit reached; no optimal solution identified.")
     else:
-        st.error(f"Solver status: {result.status}")
+        st.error(f"solver status: {result.status}")
 
-    st.caption(f"Current basis: {result.basis}")
-    st.markdown("#### Final Tableau")
+    st.caption(f"current basis: {result.basis}")
+    st.markdown("#### final tableau")
     _display_tableau(result)
 
 
@@ -66,22 +58,22 @@ def _run_solver(c: List[float], A: List[List[float]], b: List[float]) -> None:
     try:
         result = simplex(c, A, b)
     except SimplexError as exc:
-        st.error(f"Input error: {exc}")
+        st.error(f"input error: {exc}")
         return
     except Exception as exc:  # pragma: no cover - defensive
-        st.error(f"Unexpected error: {exc}")
+        st.error(f"unexpected error: {exc}")
         return
 
     _display_result(result)
 
 
 def _manual_tab():
-    st.subheader("Manual Input")
+    st.subheader("manual input")
     with st.form("manual_form"):
-        n_vars = st.number_input("Number of decision variables", min_value=1, value=3, step=1)
-        n_cons = st.number_input("Number of constraints", min_value=1, value=3, step=1)
+        n_vars = st.number_input("number of decision variables", min_value=1, value=3, step=1)
+        n_cons = st.number_input("number of constraints", min_value=1, value=3, step=1)
 
-        st.markdown("##### Objective Coefficients (c)")
+        st.markdown("##### objective function coefficients")
         c_values: List[float] = []
         for j in range(int(n_vars)):
             value = st.number_input(
@@ -92,7 +84,7 @@ def _manual_tab():
             )
             c_values.append(float(value))
 
-        st.markdown("##### Constraint Matrix (A) and RHS (b)")
+        st.markdown("##### constraint matrix (A) and RHS (b)")
         A_values: List[List[float]] = []
         b_values: List[float] = []
         for i in range(int(n_cons)):
@@ -115,7 +107,7 @@ def _manual_tab():
             A_values.append(row)
             b_values.append(float(b_val))
 
-        submitted = st.form_submit_button("Solve")
+        submitted = st.form_submit_button("solve")
 
     if submitted:
         _run_solver(c_values, A_values, b_values)
@@ -125,13 +117,13 @@ def _parse_json_payload(payload: str) -> Tuple[List[float], List[List[float]], L
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
-        raise SimplexError(f"Invalid JSON: {exc}") from exc
+        raise SimplexError(f"invalid json: {exc}") from exc
 
     if not isinstance(data, dict):
-        raise SimplexError("JSON root must be an object containing c, A, b.")
+        raise SimplexError("json root must be an object containing c, A, b.")
     missing = [key for key in ("c", "A", "b") if key not in data]
     if missing:
-        raise SimplexError(f"JSON missing keys: {', '.join(missing)}.")
+        raise SimplexError(f"json missing keys: {', '.join(missing)}.")
 
     return data["c"], data["A"], data["b"]
 
@@ -139,11 +131,11 @@ def _parse_json_payload(payload: str) -> Tuple[List[float], List[List[float]], L
 def _parse_csv_payload(payload: str) -> Tuple[List[float], List[List[float]], List[float]]:
     reader = csv.DictReader(io.StringIO(payload))
     if reader.fieldnames is None:
-        raise SimplexError("CSV must include a header row.")
+        raise SimplexError("csv must include a header row.")
 
     fieldnames_lower = [field.lower() for field in reader.fieldnames]
     if "type" not in fieldnames_lower or "b" not in fieldnames_lower:
-        raise SimplexError("CSV must include columns named 'type' and 'b'.")
+        raise SimplexError("csv must include columns named 'type' and 'b'.")
 
     type_field = reader.fieldnames[fieldnames_lower.index("type")]
     b_field = reader.fieldnames[fieldnames_lower.index("b")]
@@ -153,7 +145,7 @@ def _parse_csv_payload(payload: str) -> Tuple[List[float], List[List[float]], Li
         if idx not in (fieldnames_lower.index("type"), fieldnames_lower.index("b"))
     ]
     if not coefficient_headers:
-        raise SimplexError("CSV must include at least one decision variable column.")
+        raise SimplexError("csv must include at least one decision variable column.")
 
     objective_rows = []
     constraints = []
@@ -165,12 +157,12 @@ def _parse_csv_payload(payload: str) -> Tuple[List[float], List[List[float]], Li
         elif row_type == "constraint":
             constraints.append(raw_row)
         else:
-            raise SimplexError("CSV 'type' column must be 'objective' or 'constraint'.")
+            raise SimplexError("csv 'type' column must be 'objective' or 'constraint'.")
 
     if len(objective_rows) != 1:
-        raise SimplexError("CSV must contain exactly one objective row.")
+        raise SimplexError("csv must contain exactly one objective row.")
     if not constraints:
-        raise SimplexError("CSV must include at least one constraint row.")
+        raise SimplexError("csv must include at least one constraint row.")
 
     def _coefficients(row):
         coeffs = []
@@ -185,14 +177,14 @@ def _parse_csv_payload(payload: str) -> Tuple[List[float], List[List[float]], Li
     for row in constraints:
         value = (row.get(b_field) or "").strip()
         if value == "":
-            raise SimplexError("Constraint rows must include a value for b.")
+            raise SimplexError("constraint rows must include a value for b.")
         b.append(float(value))
 
     return c, A, b
 
 
 def _file_upload_tab():
-    st.subheader("Upload JSON or CSV")
+    st.subheader("upload json or csv")
     if "json_editor" not in st.session_state:
         st.session_state["json_editor"] = json.dumps(
             {
@@ -207,7 +199,7 @@ def _file_upload_tab():
         st.session_state["csv_filename"] = ""
 
     uploaded = st.file_uploader(
-        "Upload file", type=["json", "csv"], accept_multiple_files=False
+        "upload file", type=["json", "csv"], accept_multiple_files=False
     )
 
     if uploaded:
@@ -216,32 +208,31 @@ def _file_upload_tab():
             st.session_state["json_editor"] = payload
             st.session_state["csv_problem"] = None
             st.session_state["csv_filename"] = ""
-            st.success(f"Loaded JSON file '{uploaded.name}' into the editor.")
+            st.success(f"loaded json file '{uploaded.name}' into the editor.")
         else:
             try:
                 parsed_csv = _parse_csv_payload(payload)
             except SimplexError as exc:
                 st.session_state["csv_problem"] = None
                 st.session_state["csv_filename"] = ""
-                st.error(f"File error: {exc}")
+                st.error(f"file error: {exc}")
             else:
                 st.session_state["csv_problem"] = parsed_csv
                 st.session_state["csv_filename"] = uploaded.name
-                st.success(f"Parsed CSV file '{uploaded.name}'.")
+                st.success(f"parsed csv file '{uploaded.name}'.")
     else:
-        # Clear stored CSV data when no file is selected.
         st.session_state["csv_problem"] = None
         st.session_state["csv_filename"] = ""
 
     st.caption(
-        "JSON example: `{ \"c\": [3, 5], \"A\": [[1, 0], [0, 2]], \"b\": [4, 12] }`. "
-        "CSV header example: `type,x1,x2,b`."
+        "json example: `{ \"c\": [3, 5], \"A\": [[1, 0], [0, 2]], \"b\": [4, 12] }`. "
+        "csv header example: `type,x1,x2,b`."
     )
 
     json_content = st.text_area(
-        "JSON Problem Definition",
+        "json problem definition",
         key="json_editor",
-        placeholder="Paste or edit JSON for the LP here...",
+        placeholder="paste or edit json for the lp here...",
         height=260,
     )
 
@@ -251,32 +242,26 @@ def _file_upload_tab():
         try:
             parsed_json_problem = _parse_json_payload(json_content)
         except SimplexError as exc:
-            json_status.error(f"JSON error: {exc}")
+            json_status.error(f"json error: {exc}")
         else:
-            json_status.success("JSON input is valid.")
+            json_status.success("json input is valid.")
     else:
-        json_status.info("Provide JSON above or use the file uploader.")
+        json_status.info("provide json above or use the file uploader.")
 
     if st.session_state["csv_filename"]:
-        st.caption(f"Active CSV file: {st.session_state['csv_filename']}")
+        st.caption(f"active csv file: {st.session_state['csv_filename']}")
 
-    col_json, col_csv = st.columns(2)
-    with col_json:
-        if st.button("Solve JSON Problem", use_container_width=True):
-            if parsed_json_problem:
-                _run_solver(*parsed_json_problem)
-            else:
-                st.error("Provide a valid JSON problem before solving.")
-    with col_csv:
-        if st.button("Solve CSV Problem", use_container_width=True):
-            csv_problem = st.session_state.get("csv_problem")
-            if csv_problem:
-                _run_solver(*csv_problem)
-            else:
-                st.error("Upload and parse a CSV file first.")
+    if st.button("solve problem", use_container_width=True):
+        csv_problem = st.session_state.get("csv_problem")
+        if csv_problem:
+            _run_solver(*csv_problem)
+        elif parsed_json_problem:
+            _run_solver(*parsed_json_problem)
+        else:
+            st.error("provide a valid json problem or upload a csv file before solving.")
 
 
-tab_manual, tab_file = st.tabs(["Manual Input", "File Upload"])
+tab_manual, tab_file = st.tabs(["manual input", "file upload"])
 with tab_manual:
     _manual_tab()
 with tab_file:

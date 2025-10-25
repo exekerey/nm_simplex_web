@@ -1,16 +1,9 @@
-"""
-Pure Python simplex solver for maximization problems:
-    max c^T x
-    s.t. A x <= b, x >= 0.
-
-No external numerical libraries are used; all tableau operations rely on lists of
-floats. The solver assumes the linear program is already in standard form with
-non-negative right-hand sides.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
+
+import numpy as np
 
 
 @dataclass
@@ -28,52 +21,56 @@ class SimplexResult:
 
 
 class SimplexError(Exception):
-    """Raised when inputs violate solver assumptions."""
-
-
-def _ensure_float(value) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive path
-        raise SimplexError(f"Cannot convert value {value!r} to float.") from exc
+    pass
 
 
 def _validate_dimensions(
     c: Sequence[float], A: Sequence[Sequence[float]], b: Sequence[float]
-) -> Tuple[List[float], List[List[float]], List[float]]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     if not c:
-        raise SimplexError("Objective vector c must be non-empty.")
+        raise SimplexError("objective vector c must be non-empty.")
     if not A:
-        raise SimplexError("Constraint matrix A must contain at least one row.")
+        raise SimplexError("constraint matrix A must contain at least one row.")
 
-    c_vec = [_ensure_float(v) for v in c]
-    A_mat = [[_ensure_float(a_ij) for a_ij in row] for row in A]
-    b_vec = [_ensure_float(v) for v in b]
+    try:
+        c_arr = np.asarray(c, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise SimplexError("objective vector c must contain numeric values.") from exc
+    try:
+        A_arr = np.asarray(A, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise SimplexError("constraint matrix A must be rectangular with numeric values.") from exc
+    try:
+        b_arr = np.asarray(b, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise SimplexError("constraint vector b must contain numeric values.") from exc
 
-    num_constraints = len(A_mat)
-    num_variables = len(A_mat[0])
+    if c_arr.ndim != 1:
+        raise SimplexError("objective vector c must be one-dimensional.")
+    if A_arr.ndim != 2:
+        raise SimplexError("constraint matrix A must be two-dimensional.")
+    if b_arr.ndim != 1:
+        raise SimplexError("constraint vector b must be one-dimensional.")
 
-    if len(c_vec) != num_variables:
+    num_constraints, num_variables = A_arr.shape
+
+    if c_arr.size != num_variables:
         raise SimplexError(
-            "Length of c does not match number of columns in A "
-            f"({len(c_vec)} vs {num_variables})."
+            "length of c does not match number of columns in A "
+            f"({c_arr.size} vs {num_variables})."
         )
-    if len(b_vec) != num_constraints:
+    if b_arr.size != num_constraints:
         raise SimplexError(
-            "Length of b does not match number of rows in A "
-            f"({len(b_vec)} vs {num_constraints})."
+            "length of b does not match number of rows in A "
+            f"({b_arr.size} vs {num_constraints})."
         )
 
-    for row in A_mat:
-        if len(row) != num_variables:
-            raise SimplexError("All rows in A must have the same length.")
-    for b_i in b_vec:
-        if b_i < 0:
-            raise SimplexError(
-                "All entries of b must be non-negative for <= constraints."
-            )
+    if np.any(b_arr < 0):
+        raise SimplexError(
+            "all entries of b must be non-negative for <= constraints."
+        )
 
-    return c_vec, A_mat, b_vec
+    return c_arr, A_arr, b_arr
 
 
 def simplex(
@@ -84,107 +81,88 @@ def simplex(
     max_iter: int = 100,
     tol: float = 1e-9,
 ) -> SimplexResult:
-    """
-    Solve a standard-form maximization linear program using the simplex method.
-
-    Parameters
-    ----------
-    c, A, b :
-        Problem data for max c^T x subject to A x <= b, x >= 0.
-    max_iter : int
-        Maximum number of pivot iterations.
-    tol : float
-        Tolerance used when selecting entering and leaving variables.
-    """
-    c_vec, A_mat, b_vec = _validate_dimensions(c, A, b)
-    m = len(A_mat)
-    n = len(c_vec)
+    c_arr, A_arr, b_arr = _validate_dimensions(c, A, b)
+    m, n = A_arr.shape
 
     width = n + m + 1
-    tableau: List[List[float]] = [[0.0] * width for _ in range(m + 1)]
+    tableau = np.zeros((m + 1, width), dtype=float)
 
-    for i in range(m):
-        for j in range(n):
-            tableau[i][j] = A_mat[i][j]
-        tableau[i][n + i] = 1.0  # Slack variable coefficient.
-        tableau[i][-1] = b_vec[i]
-
-    for j in range(n):
-        tableau[-1][j] = -c_vec[j]
+    tableau[:m, :n] = A_arr
+    tableau[:m, n:n + m] = np.eye(m, dtype=float)
+    tableau[:m, -1] = b_arr
+    tableau[-1, :n] = -c_arr
 
     basis: List[int] = [n + i for i in range(m)]
     iterations = 0
 
     while iterations < max_iter:
-        reduced_costs = tableau[-1][:-1]
-        entering_candidates = [idx for idx, value in enumerate(reduced_costs) if value < -tol]
+        reduced_costs = tableau[-1, :-1]
+        entering_candidates = np.where(reduced_costs < -tol)[0]
 
-        if not entering_candidates:
-            full_solution = [0.0] * (n + m)
+        if entering_candidates.size == 0:
+            full_solution = np.zeros(n + m, dtype=float)
             for row_index, var_index in enumerate(basis):
-                full_solution[var_index] = tableau[row_index][-1]
+                full_solution[var_index] = tableau[row_index, -1]
             primal_solution = full_solution[:n]
-            optimal_value = sum(c_vec[j] * primal_solution[j] for j in range(n))
+            optimal_value = float(np.dot(c_arr, primal_solution))
 
             return SimplexResult(
                 status="optimal",
                 optimal_value=optimal_value,
-                solution=primal_solution,
+                solution=primal_solution.tolist(),
                 iterations=iterations,
                 basis=basis.copy(),
-                tableau=[row[:] for row in tableau],
+                tableau=tableau.tolist(),
                 num_variables=n,
                 num_constraints=m,
             )
 
-        entering = min(entering_candidates, key=lambda idx: reduced_costs[idx])
-        column = [tableau[i][entering] for i in range(m)]
+        entering = int(entering_candidates[np.argmin(reduced_costs[entering_candidates])])
+        column = tableau[:m, entering]
 
-        if all(value <= tol for value in column):
+        if np.all(column <= tol):
             return SimplexResult(
                 status="unbounded",
                 optimal_value=None,
                 solution=None,
                 iterations=iterations,
                 basis=basis.copy(),
-                tableau=[row[:] for row in tableau],
+                tableau=tableau.tolist(),
                 num_variables=n,
                 num_constraints=m,
             )
 
-        ratios = []
-        for i in range(m):
-            if column[i] > tol:
-                ratios.append((tableau[i][-1] / column[i], i))
-        if not ratios:
+        feasible_rows = np.where(column > tol)[0]
+        if feasible_rows.size == 0:
             return SimplexResult(
                 status="unbounded",
                 optimal_value=None,
                 solution=None,
                 iterations=iterations,
                 basis=basis.copy(),
-                tableau=[row[:] for row in tableau],
+                tableau=tableau.tolist(),
                 num_variables=n,
                 num_constraints=m,
             )
 
-        _, leaving = min(ratios, key=lambda item: (item[0], basis[item[1]]))
-        pivot = tableau[leaving][entering]
+        ratios = [
+            (tableau[i, -1] / column[i], basis[i], i) for i in feasible_rows
+        ]
+        _, _, leaving = min(ratios, key=lambda item: (item[0], item[1]))
+
+        pivot = tableau[leaving, entering]
         if abs(pivot) <= tol:
             raise SimplexError("Encountered zero pivot; consider perturbing the problem.")
 
-        pivot_row = [value / pivot for value in tableau[leaving]]
-        tableau[leaving] = pivot_row
+        tableau[leaving] = tableau[leaving] / pivot
 
         for i in range(m + 1):
             if i == leaving:
                 continue
-            factor = tableau[i][entering]
+            factor = tableau[i, entering]
             if abs(factor) <= tol:
                 continue
-            tableau[i] = [
-                tableau[i][j] - factor * pivot_row[j] for j in range(width)
-            ]
+            tableau[i] = tableau[i] - factor * tableau[leaving]
 
         basis[leaving] = entering
         iterations += 1
@@ -195,7 +173,7 @@ def simplex(
         solution=None,
         iterations=iterations,
         basis=basis.copy(),
-        tableau=[row[:] for row in tableau],
+        tableau=tableau.tolist(),
         num_variables=n,
         num_constraints=m,
     )
